@@ -1,2 +1,2 @@
 # gt_oc_items_holder
-Авто поддержание количества предметов в МЕ сети.
+Auto maintenance of the number of items in the ME network.
