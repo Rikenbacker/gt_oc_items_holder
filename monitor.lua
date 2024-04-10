@@ -25,6 +25,7 @@ local stages = {
 
 local status = {
     stage = stages.wait,         -- Теущая стадия обработки
+    shootDown = false,           -- Пора вырубаться
     recipeName = nil,            -- Имя опознаного рецепта (только для отображения)
     recipe = nil                 -- Распознаный рецепт
 }
@@ -59,16 +60,10 @@ local Tools = {}
 function Tools.new()
     local obj = {}
     local interface = "me_interface"
-    local transposer = "transposer"
-    local redstone = "redstone"
 
     for address, type in component.list() do
         if type == interface and obj[interface] == nil then
             obj[interface] = component.proxy(address)
-        elseif type == transposer and obj[transposer] == nil then
-            obj[transposer] = component.proxy(address)
-        elseif type == redstone and obj[redstone] == nil then
-            obj[redstone] = component.proxy(address)
         end
     end
     
@@ -76,41 +71,11 @@ function Tools.new()
         return obj[interface]
     end
     
-    function obj.getTransposer()
-        return obj[transposer]
-    end
-    
-    function obj.getRedstone()
-        return obj[redstone]
-    end    
     
     function obj.makeLabel(item)
         return item.name .. "/" .. item.damage
     end
-    
-    function obj.getInput()
-        local items = {}
-        local values = obj[transposer].getAllStacks(settings.inputSide).getAll()
-        for i = 0, #values do
-            if values[i].size ~= nil then
-                table.insert(items, {name = obj.makeLabel(values[i]), size = values[i].size, position = i})
-            end
-        end
-        
-        return items
-    end
-    
-    function obj.checkAltar()
-        local values = obj[transposer].getAllStacks(settings.altarSide).getAll()
-        for i = 0, #values do
-            if values[i].size ~= nil then
-                return true
-            end
-        end
-        
-        return false
-    end 
-    
+           
     function obj.craftingAspect(aspect, count, essentia)
         if status.craft ~= nil then
             if status.craft.isCanceled() == true then 
@@ -132,24 +97,19 @@ function Tools.new()
         end
     end
     
-    function obj.checkAspects(recipe, essentia)
-        local aspects = obj[interface].getEssentiaInNetwork()
+    function obj.checkItem(type, item, count)
+        if type == "Esentia" then
+            local aspects = obj[interface].getEssentiaInNetwork()
 
-        local fullMatch = true
-        for i = 1, #recipe.aspects do
             local match = false
-            local count = recipe.aspects[i].size
-            for j = 1, #aspects do
-            
-                if aspects[j].name == recipe.aspects[i].name then
-                    if aspects[j].amount >= recipe.aspects[i].size then
-                        match = true
-                    else
-                        count = recipe.aspects[i].size - aspects[j].amount
+            for j = 1, #aspects do            
+                if aspects[j].name == item then
+                    if aspects[j].amount >= count then
+                        return true
                     end
                 end
             end
-            
+
             if match == false then
                 fullMatch = false
                 status.message = "&yellow;Not enought: " .. essentia.getLabel(recipe.aspects[i].name) .. " (" .. count .. ")"
@@ -157,73 +117,8 @@ function Tools.new()
             end
         end
 
-        return fullMatch
+        return false
     end
-    
-    function obj.transferItemsToAltar(inputItems)
-        local itemName = inputItems[1].name
-
-        obj[transposer].transferItem(settings.inputSide, settings.altarSide, 1, inputItems[1].position + 1, 1)        
-        inputItems[1].size = inputItems[1].size - 1
-        
-        for i = 1, #inputItems do
-            if inputItems[i].size > 0 then
-                obj[transposer].transferItem(settings.inputSide, settings.piedestalSide, inputItems[i].size)
-            end
-        end
-        
-        obj[redstone].setOutput(settings.redstonePiedestalSide, 15)
-        
-        local notEmpty = true
-        repeat 
-            notEmpty = false
-            local values = obj[transposer].getAllStacks(settings.altarSide).getAll()
-            for i = 1, #values do
-                if values[i].label ~= nil then
-                    notEmpty = true
-                end
-            end
-            os.sleep(settings.refreshPiedistalInterval)
-        until (notEmpty == false)
-        
-        obj[redstone].setOutput(settings.redstonePiedestalSide, 0)
-        
-        return itemName
-    end
-    
-    function obj.waitForInfusion(itemName)
-        obj[redstone].setOutput(settings.redstoneInfusionSide, 15)
-    
-        local isDone = false
-        if obj[transposer].getStackInSlot(settings.altarSide, 1) ~= nil then
-            if obj.makeLabel(obj[transposer].getStackInSlot(settings.altarSide, 1)) ~= itemName then
-                isDone = true
-            end    
-        else 
-            status.message = "Error: Result is dissapeared"
-            isDone = true
-        end
-        
-        if isDone == true then
-            obj[redstone].setOutput(settings.redstoneInfusionSide, 0)
-            
-            local notEmpty = true
-            repeat 
-                notEmpty = false
-                
-                local values = obj[transposer].getStackInSlot(settings.altarSide, 1)
-                if values ~= nil then
-                    notEmpty = true
-                end
-                
-                obj[transposer].transferItem(settings.altarSide, settings.outputSide)
-                
-                os.sleep(settings.refreshPiedistalInterval)
-            until (notEmpty == false)            
-        end
-        
-        return isDone
-    end    
     
     return obj
 end
@@ -277,8 +172,7 @@ end
 
 function main()
     local tools = Tools.new()
-    local recipes = Recipes.new()
-    local essentia = Essentia.new()
+    local items = Items.new()
 
     if tools.getInterface() ~= nil then
         print("ME Interface found")
@@ -287,21 +181,7 @@ function main()
         return 1
     end
     
-    if tools.getTransposer() ~= nil then
-        print("Transposer found")
-    else
-        print("ERROR: Transposer not found!")
-        return 1
-    end
-    
-    if tools.getRedstone() ~= nil then
-        print("Redstone found")
-    else
-        print("ERROR: Redstone not found!")
-        return 1
-    end    
-    
-    print("Recipes loaded:", recipes.getCount())
+    print("Items loaded:", items.getCount())
     
     thread.create(
       function()
@@ -317,7 +197,6 @@ function main()
     
     status.shootDown = true
     screen.resetScreen()
-    
 end
 
 main()
